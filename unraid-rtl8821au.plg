@@ -2,7 +2,7 @@
 <!DOCTYPE PLUGIN [
   <!ENTITY name      "unraid-rtl8821au">
   <!ENTITY author    "elibosley">
-  <!ENTITY version   "2026.06.26">
+  <!ENTITY version   "2026.06.26.1">
   <!ENTITY gitURL    "https://github.com/&author;/&name;/raw/main">
   <!ENTITY pluginURL "&gitURL;/unraid-rtl8821au.plg">
   <!ENTITY relURL    "https://github.com/&author;/&name;/releases/download">
@@ -14,6 +14,8 @@
 <PLUGIN name="&name;" author="&author;" version="&version;" pluginURL="&pluginURL;" min="6.12.0">
 
 <CHANGES>
+###2026.06.26.1
+- Auto-connect wlan0 via wpa_supplicant + dhcpcd when wpa_supplicant.conf is present.
 ###2026.06.26
 - Initial release: out-of-tree morrownr 8821au driver (RTL8811AU / RTL8821AU) for Unraid.
 </CHANGES>
