@@ -70,8 +70,10 @@ download() {
     rm -f "${CACHE}"; exit 1
   fi
   wget -q -O "${CACHE}.md5" "${DL_URL}/${BUNDLE}.md5" 2>/dev/null
-  if [ -s "${CACHE}.md5" ] && [ "$(md5sum "${CACHE}" | awk '{print $1}')" != "$(awk '{print $1}' "${CACHE}.md5")" ]; then
-    echo "ERROR: checksum mismatch on ${BUNDLE}"; rm -f "${CACHE}" "${CACHE}.md5"; exit 1
+  if [ -s "${CACHE}.md5" ]; then
+    if [ "$(md5sum "${CACHE}" | awk '{print $1}')" != "$(awk '{print $1}' "${CACHE}.md5")" ]; then
+      echo "ERROR: checksum mismatch on ${BUNDLE}"; rm -f "${CACHE}" "${CACHE}.md5"; exit 1
+    fi
   fi
 }
 
@@ -91,8 +93,8 @@ for m in rtw88_8821au rtw88_8812au rtw88_8814au ; do
   /sbin/modprobe "$m" 2>/dev/null
 done
 sleep 1
-if /sbin/lsmod | grep -q "^rtw88_core" && ls /sys/class/net/ | grep -q "^wlan" ; then
-  loaded="yes"
+if /sbin/lsmod | grep -q "^rtw88_core" ; then
+  if ls /sys/class/net/ | grep -q "^wlan" ; then loaded="yes"; fi
 fi
 
 echo ""
