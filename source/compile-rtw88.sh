@@ -32,20 +32,20 @@ make -j"$JOBS" olddefconfig
 make -j"$JOBS" modules_prepare
 echo "::endgroup::"
 
-echo "::group::Build rtw88 chip + USB modules"
+echo "::group::Build rtw88 modules (whole dir, so shared deps like rtw88_88xxa are built)"
 # Module.symvers is absent after modules_prepare; with MODVERSIONS off the inter-
 # module symbols (rtw88_core/usb, mac80211) resolve by name at load time, so let
-# modpost warn instead of error.
+# modpost warn instead of error. Build the whole rtw88/ dir so the shared A-series
+# module (rtw88_88xxa, providing rtw88xxa_* symbols) is produced too.
 RTW=drivers/net/wireless/realtek/rtw88
-make -j"$JOBS" KBUILD_MODPOST_WARN=1 \
-  "$RTW/rtw88_8821a.ko" "$RTW/rtw88_8821au.ko" \
-  "$RTW/rtw88_8812a.ko" "$RTW/rtw88_8812au.ko" \
-  "$RTW/rtw88_8814a.ko" "$RTW/rtw88_8814au.ko" || true
+make -j"$JOBS" KBUILD_MODPOST_WARN=1 "$RTW/"
 echo "::endgroup::"
 
 mkdir -p "$OUT"
 got=0
-for m in rtw88_8821a rtw88_8821au rtw88_8812a rtw88_8812au rtw88_8814a rtw88_8814au; do
+# Ship the A-series chip/USB modules plus the shared rtw88_88xxa they depend on.
+# (rtw88_core / rtw88_usb / mac80211 / cfg80211 are already present on the box.)
+for m in rtw88_88xxa rtw88_8821a rtw88_8821au rtw88_8812a rtw88_8812au rtw88_8814a rtw88_8814au; do
   f="$RTW/$m.ko"
   if [ -f "$f" ]; then
     vm="$(modinfo -F vermagic "$f")"
