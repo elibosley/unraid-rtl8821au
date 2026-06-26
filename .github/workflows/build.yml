@@ -11,10 +11,6 @@ on:
         description: "Exact kernel release (uname -r) to build using a committed config. Overrides unraid_version."
         required: false
         default: ""
-      driver_ref:
-        description: "morrownr/8821au git ref to build"
-        required: false
-        default: "main"
       force:
         description: "Rebuild/republish even if a release already exists"
         required: false
@@ -51,12 +47,8 @@ jobs:
         run: |
           set -e
           if [ -n "$KVER_IN" ]; then
-            # Explicit kernel: must already have a committed config.
-            if [ ! -f "kernel/$KVER_IN/config" ]; then
-              echo "ERROR: no committed config at kernel/$KVER_IN/config"; exit 1
-            fi
+            [ -f "kernel/$KVER_IN/config" ] || { echo "ERROR: no committed config at kernel/$KVER_IN/config"; exit 1; }
             echo "kver=$KVER_IN" >> "$GITHUB_OUTPUT"
-            echo "Using committed config for $KVER_IN"
           else
             export UNRAID_VERSION="${UNRAID_IN:-latest}"
             bash source/fetch-unraid-config.sh
@@ -76,14 +68,13 @@ jobs:
             echo "skip=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Build 8821au.ko
+      - name: Build rtw88 driver bundle
         if: steps.gate.outputs.skip != 'true'
         env:
           KVER: ${{ steps.resolve.outputs.kver }}
-          DRIVER_REF: ${{ github.event.inputs.driver_ref || 'main' }}
           REPO: ${{ github.workspace }}
           OUT: ${{ github.workspace }}/out
-        run: bash source/compile.sh
+        run: bash source/compile-rtw88.sh
 
       - name: Commit recovered config (provenance)
         if: steps.gate.outputs.skip != 'true'
@@ -100,18 +91,6 @@ jobs:
             echo "config for $KVER already committed; nothing to push"
           fi
 
-      - name: Summarize
-        if: steps.gate.outputs.skip != 'true'
-        run: |
-          {
-            echo "### Built 8821au for \`${{ steps.resolve.outputs.kver }}\`"
-            echo '```'
-            modinfo out/8821au.ko | grep -E 'vermagic|version' || true
-            echo "md5 $(cat out/8821au.ko.md5)"
-            echo "driver $(cat out/driver.sha)"
-            echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
-
       - name: Publish release (tag == kernel version)
         if: steps.gate.outputs.skip != 'true'
         env:
@@ -120,6 +99,6 @@ jobs:
         run: |
           gh release delete "$KVER" --yes --cleanup-tag 2>/dev/null || true
           gh release create "$KVER" \
-            out/8821au.ko out/8821au.ko.md5 \
-            --title "8821au for $KVER" \
-            --notes "RTL8811AU/RTL8821AU (morrownr 8821au, $(cat out/driver.sha)) built for Unraid kernel \`$KVER\`. Installed automatically by the plugin."
+            "out/rtw88-$KVER.tar.gz" "out/rtw88-$KVER.tar.gz.md5" \
+            --title "rtw88 (RTL8811AU/8821AU/8812AU/8814AU) for $KVER" \
+            --notes "In-kernel mac80211 rtw88 driver modules + firmware for Unraid kernel \`$KVER\`, with the A-series chip support Unraid ships disabled. Supports WPA3-SAE. Installed automatically by the plugin."

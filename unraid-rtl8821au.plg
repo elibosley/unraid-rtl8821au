@@ -2,7 +2,7 @@
 <!DOCTYPE PLUGIN [
   <!ENTITY name      "unraid-rtl8821au">
   <!ENTITY author    "elibosley">
-  <!ENTITY version   "2026.06.26.2">
+  <!ENTITY version   "2026.06.27">
   <!ENTITY gitURL    "https://github.com/&author;/&name;/raw/main">
   <!ENTITY pluginURL "&gitURL;/unraid-rtl8821au.plg">
   <!ENTITY relURL    "https://github.com/&author;/&name;/releases/download">
@@ -14,108 +14,106 @@
 <PLUGIN name="&name;" author="&author;" version="&version;" pluginURL="&pluginURL;" min="6.12.0">
 
 <CHANGES>
+###2026.06.27
+- Switch to the in-kernel mac80211 rtw88 driver (RTL8811AU/8821AU/8812AU/8814AU)
+  which Unraid ships disabled. Bundles firmware. Supports WPA3-SAE (the morrownr
+  fullmac driver did not). Unraid manages the connection (Network Settings).
 ###2026.06.26.2
-- Driver-only: removed plugin-managed wpa_supplicant/dhcpcd. Unraid 7.x manages
-  wlan0 association natively (Settings -> Network Settings); plugin just loads the module.
-###2026.06.26.1
-- Auto-connect wlan0 via wpa_supplicant + dhcpcd when wpa_supplicant.conf is present.
+- Driver-only; Unraid 7.x manages wlan0 association natively.
 ###2026.06.26
-- Initial release: out-of-tree morrownr 8821au driver (RTL8811AU / RTL8821AU) for Unraid.
+- Initial release (morrownr 8821au fullmac driver).
 </CHANGES>
 
 <FILE Name="&emhttp;/README.md">
 <INLINE>
-**RTL8811AU / RTL8821AU USB WiFi driver (out-of-tree, morrownr 8821au)**
+**RTL8811AU/8821AU/8812AU/8814AU USB WiFi driver (in-kernel rtw88, mac80211)**
 
-Provides a `wlan0` interface for USB WiFi adapters based on the Realtek
-RTL8811AU / RTL8821AU chipset (e.g. TP-Link Archer T2U Nano `2357:011e`),
-which has no in-kernel driver on Unraid.
+Builds and installs the `rtw88` A-series chip modules that Unraid ships disabled
+(`CONFIG_RTW88_8821AU` is not set), plus their firmware. Because `rtw88` is a
+mac80211 driver, **WPA3-SAE / PMF work** (verified on RTL8811AU). Configure the
+connection in **Settings -> Network Settings**; Unraid manages association/DHCP.
+Set your Country/Region there or 5 GHz channels stay scan-only (no-IR).
 
-The matching `8821au.ko` is built in CI per Unraid kernel release and pulled
-from this plugin's GitHub releases (tag == `uname -r`). On every boot the
-plugin re-installs the module into the RAM module tree and loads it.
+Driver-only otherwise: this plugin loads the module and stops. Not bridgeable
+into br0 (802.11 station limitation), so no Docker/VM bridged networking over it.
 
-NOTE: this is a host-only client interface. It is not bridgeable into `br0`
-and is not managed by Unraid's Network Settings GUI. Configure the connection
-with `wpa_supplicant`. After an Unraid OS upgrade, a new release must exist for
-the new kernel version (re-run the build workflow) or the module won't load.
-
-Source driver: https://github.com/morrownr/8821au-20210708
+Modules + firmware are built per Unraid kernel in CI and pulled from this repo's
+releases (tag == `uname -r`).
 </INLINE>
 </FILE>
 
 <FILE Run="/bin/bash">
 <INLINE>
 KERNEL_V="$(uname -r)"
-MODNAME="8821au"
 PKG_DIR="&packages;/${KERNEL_V}"
-KO_CACHE="${PKG_DIR}/${MODNAME}.ko"
-MOD_DEST="/lib/modules/${KERNEL_V}/kernel/drivers/net/wireless/realtek/${MODNAME}"
+BUNDLE="rtw88-${KERNEL_V}.tar.gz"
+CACHE="${PKG_DIR}/${BUNDLE}"
 DL_URL="&relURL;/${KERNEL_V}"
 
 mkdir -p "${PKG_DIR}"
 
-# Drop caches for any other (old) kernel versions to keep the flash tidy.
+# Tidy caches for other kernel versions.
 for d in &packages;/*; do
   [ -d "$d" ] || continue
   [ "$(basename "$d")" = "${KERNEL_V}" ] || rm -rf "$d"
 done
 
 download() {
-  echo "Downloading ${MODNAME}.ko for kernel ${KERNEL_V} ..."
-  if ! wget -q -nc --show-progress --progress=bar:force:noscroll -O "${KO_CACHE}" "${DL_URL}/${MODNAME}.ko" ; then
+  echo "Downloading rtw88 driver bundle for kernel ${KERNEL_V} ..."
+  if ! wget -q -nc --show-progress --progress=bar:force:noscroll -O "${CACHE}" "${DL_URL}/${BUNDLE}" ; then
     echo "------------------------------------------------------------------"
-    echo "ERROR: no ${MODNAME}.ko release found for kernel ${KERNEL_V}."
-    echo "Build it first: run the 'build-driver' workflow in"
-    echo "  https://github.com/&author;/&name;"
-    echo "with kernel_version=${KERNEL_V}, then reinstall this plugin."
+    echo "ERROR: no rtw88 bundle released for kernel ${KERNEL_V}."
+    echo "Run the 'build-driver' workflow at"
+    echo "  https://github.com/&author;/&name;  (kernel_version=${KERNEL_V}),"
+    echo "then reinstall this plugin."
     echo "------------------------------------------------------------------"
-    rm -f "${KO_CACHE}"
-    exit 1
+    rm -f "${CACHE}"; exit 1
   fi
-  wget -q -O "${KO_CACHE}.md5" "${DL_URL}/${MODNAME}.ko.md5" 2>/dev/null
-  if [ -s "${KO_CACHE}.md5" ]; then
-    if [ "$(md5sum "${KO_CACHE}" | awk '{print $1}')" != "$(awk '{print $1}' "${KO_CACHE}.md5")" ]; then
-      echo "ERROR: checksum mismatch on ${MODNAME}.ko"
-      rm -f "${KO_CACHE}" "${KO_CACHE}.md5"
-      exit 1
-    fi
+  wget -q -O "${CACHE}.md5" "${DL_URL}/${BUNDLE}.md5" 2>/dev/null
+  if [ -s "${CACHE}.md5" ] && [ "$(md5sum "${CACHE}" | awk '{print $1}')" != "$(awk '{print $1}' "${CACHE}.md5")" ]; then
+    echo "ERROR: checksum mismatch on ${BUNDLE}"; rm -f "${CACHE}" "${CACHE}.md5"; exit 1
   fi
 }
 
-# Fetch to flash cache if we don't already have it.
-[ -s "${KO_CACHE}" ] || download
+[ -s "${CACHE}" ] || download
 
-# Install into the (tmpfs) running module tree and register it.
-install -D -m 0644 "${KO_CACHE}" "${MOD_DEST}/${MODNAME}.ko"
+# Do not let the old fullmac driver claim the device.
+/sbin/modprobe -rf 8821au 2>/dev/null
+
+# Extract modules (-> /lib/modules/...) and firmware (-> /lib/firmware/rtw88).
+tar -xzf "${CACHE}" -C /
 depmod -a
 
-# Load it (idempotent).
-if ! /sbin/lsmod | grep -q "^${MODNAME}\b" ; then
-  if /sbin/modprobe "${MODNAME}" 2>/dev/null ; then
-    echo "${MODNAME} loaded."
-  else
-    echo "WARNING: modprobe ${MODNAME} failed - check 'dmesg | tail'."
-  fi
+# Load the USB-glue module for whichever A-series chip is present; the kernel
+# binds the one matching the device. Loading the others just registers a driver.
+loaded="no"
+for m in rtw88_8821au rtw88_8812au rtw88_8814au ; do
+  /sbin/modprobe "$m" 2>/dev/null
+done
+sleep 1
+if /sbin/lsmod | grep -q "^rtw88_core" && ls /sys/class/net/ | grep -q "^wlan" ; then
+  loaded="yes"
 fi
 
 echo ""
 echo "-----------------------------------------------------------"
-echo " rtl8821au plugin installed for kernel ${KERNEL_V}."
-echo " Adapter now appears as wlan0. Configure the connection in"
-echo " Unraid: Settings -> Network Settings (wlan0). Unraid owns"
-echo " association (wpa_supplicant) and DHCP; this plugin only"
-echo " provides the driver."
+if [ "$loaded" = "yes" ]; then
+  echo " rtw88 driver installed for kernel ${KERNEL_V}; wlan0 is up."
+else
+  echo " rtw88 installed for ${KERNEL_V}, but no wlan interface yet."
+  echo " Check: dmesg | grep rtw88   (adapter plugged in?)"
+fi
+echo " Configure WiFi in Settings -> Network Settings (set Region!)."
+echo " WPA3-SAE is supported. Unraid manages association + DHCP."
 echo "-----------------------------------------------------------"
 </INLINE>
 </FILE>
 
 <FILE Run="/bin/bash" Method="remove">
 <INLINE>
-MODNAME="8821au"
-/sbin/modprobe -rf "${MODNAME}" 2>/dev/null
+/sbin/modprobe -rf rtw88_8821au rtw88_8812au rtw88_8814au rtw88_8821a rtw88_8812a rtw88_8814a rtw88_88xxa 2>/dev/null
 rm -rf &plugin; &emhttp;
-echo "rtl8821au plugin removed. Module unloaded; reboot to fully clear."
+echo "rtw88 plugin removed. Modules unloaded; reboot to fully clear."
 </INLINE>
 </FILE>
 
