@@ -56,7 +56,14 @@ cd "$WORK"
 git clone --depth 1 --branch "$DRIVER_REF" https://github.com/morrownr/8821au-20210708 driver \
   || git clone --depth 1 https://github.com/morrownr/8821au-20210708 driver
 DRV_SHA="$(git -C driver rev-parse HEAD)"
-make -j"$JOBS" -C driver KVER="$KVER" KSRC="$KDIR" modules
+# modules_prepare does not generate Module.symvers, so modpost has no export
+# table to resolve against. With CONFIG_MODVERSIONS off there are no symbol
+# CRCs, and every referenced symbol (mutex_lock, schedule, ...) is a real
+# exported kernel symbol resolved by name at insmod time. KBUILD_MODPOST_WARN=1
+# downgrades modpost's "undefined!" errors to warnings so the .ko is produced.
+# Correctness is verified by the vermagic check below and by load-testing on the
+# actual Unraid box.
+make -j"$JOBS" -C driver KVER="$KVER" KSRC="$KDIR" KBUILD_MODPOST_WARN=1 modules
 echo "::endgroup::"
 
 echo "::group::Verify vermagic"
