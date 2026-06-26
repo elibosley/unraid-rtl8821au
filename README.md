@@ -48,7 +48,7 @@ After an Unraid OS upgrade the kernel changes, so a new release is needed:
 ## Install
 
 Plugins → Install Plugin →
-`https://github.com/elibosley/unraid-rtl8821au/raw/main/rtl8821au.plg`
+`https://github.com/elibosley/unraid-rtl8821au/raw/main/unraid-rtl8821au.plg`
 
 ## License
 

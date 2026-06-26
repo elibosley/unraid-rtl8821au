@@ -4,7 +4,7 @@
   <!ENTITY author    "elibosley">
   <!ENTITY version   "2026.06.26">
   <!ENTITY gitURL    "https://github.com/&author;/&name;/raw/main">
-  <!ENTITY pluginURL "&gitURL;/rtl8821au.plg">
+  <!ENTITY pluginURL "&gitURL;/unraid-rtl8821au.plg">
   <!ENTITY relURL    "https://github.com/&author;/&name;/releases/download">
   <!ENTITY plugin    "/boot/config/plugins/&name;">
   <!ENTITY emhttp    "/usr/local/emhttp/plugins/&name;">
