@@ -61,25 +61,26 @@ From the Actions tab → **build-driver** → *Run workflow*:
 
 ## Connecting to a network
 
-`wlan0` is a plain client interface managed by `wpa_supplicant`. Drop a config
-on the flash and reinstall the plugin (or reboot) — it auto-connects on boot:
+This plugin is **driver-only**. Once `wlan0` exists, configure the connection in
+**Settings → Network Settings** — Unraid 7.x manages wifi natively (`rc.wireless`
++ `/boot/config/wireless.cfg`, starting its own `wpa_supplicant` and `dhcpcd`).
+Don't run a second `wpa_supplicant` against `wlan0` or it will fight Unraid's.
 
-```sh
-# hashes the passphrase (plaintext is not stored)
-wpa_passphrase "YourSSID" "YourPassphrase" \
-  > /boot/config/plugins/unraid-rtl8821au/wpa_supplicant.conf
-plugin install /boot/config/plugins/unraid-rtl8821au.plg   # connect now
-```
+Two things to get right in the GUI:
 
-The plugin starts `wpa_supplicant -i wlan0 -D nl80211` and `dhcpcd wlan0` on
-every boot whenever that config file exists.
+- **Set your Country/Region.** With the regulatory domain unset (`country 00`),
+  5 GHz channels are `no-IR` (scan-only) and association silently fails. Setting
+  the region unlocks them.
+- **WPA3-SAE is unreliable on this chipset.** The RTL8811AU/8821AU fullmac driver
+  often fails to associate to WPA3-Personal (SAE / PMF-required) APs. Prefer a
+  WPA2-PSK SSID, or set the AP to WPA2/WPA3 mixed mode.
 
 ## Caveats
 
-- **Host-only.** `wlan0` from this driver is a client interface. It **cannot**
-  be bridged into Unraid's `br0` (an 802.11 station can't bridge multiple MACs),
-  and Unraid's Network Settings GUI won't manage it. Configure it with
-  `wpa_supplicant`. Docker/VM bridged networking will not ride over it.
+- **Host-only.** `wlan0` is a client interface. Unraid's Network Settings GUI
+  *does* manage its association (SSID/passphrase/DHCP), but it **cannot** be
+  bridged into `br0` — an 802.11 station can't bridge multiple MACs — so
+  Docker/VM bridged networking will not ride over it.
 - **Breaks on kernel upgrade** until a release exists for the new version.
 
 ## Install
