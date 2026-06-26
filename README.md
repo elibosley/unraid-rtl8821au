@@ -27,15 +27,37 @@ The build works without rebuilding the whole kernel because Unraid kernels set
 (`<kver> SMP preempt mod_unload`). The pinned per-kernel `.config` lives under
 [`kernel/`](kernel/).
 
-## Building for a new kernel
+## Self-updating builds
 
-After an Unraid OS upgrade the kernel changes, so a new release is needed:
+The **build-driver** workflow runs **daily on a schedule** and keeps releases in
+sync with Unraid automatically:
 
-1. Add the new kernel's `.config` under `kernel/<uname -r>/config`
-   (copy it from the box: `/usr/src/linux-$(uname -r)/config`).
-2. Run the **build-driver** workflow (Actions tab) with
-   `kernel_version=<uname -r>`.
-3. Reinstall / update the plugin on the box.
+1. It reads the official release feed (`https://releases.unraid.net/json`) and
+   resolves the latest stable Unraid version.
+2. It recovers that build's exact kernel `.config` and kernel release string by
+   downloading the release zip and extracting just `src/` from `bzmodules`
+   (the squashfs mounted at `/usr` on a live system) — no access to a running
+   box required. The recovered config is committed under `kernel/<kver>/` for
+   provenance.
+3. If a release for that kernel already exists, it no-ops. Otherwise it builds
+   `8821au.ko` and publishes a release tagged with the kernel version.
+
+So when Unraid ships an OS update with a new kernel, a matching driver release
+appears automatically (within ~24h). On the box, the plugin then pulls the `.ko`
+for the running `uname -r` on its next boot/reinstall.
+
+### Manual / on-demand builds
+
+From the Actions tab → **build-driver** → *Run workflow*:
+
+- `unraid_version`: `latest` (default) or a specific version like `7.3.1`.
+- `kernel_version`: build an exact `uname -r` from an already-committed config
+  (overrides `unraid_version`).
+- `force`: rebuild/republish even if the release already exists.
+
+> Timing note: if you update the box to a brand-new kernel *before* the daily
+> build has published for it, the plugin will report no release yet — trigger
+> the workflow manually (or wait for the next run), then reinstall the plugin.
 
 ## Connecting to a network
 
