@@ -52,7 +52,8 @@ mkdir -p "${PKG_DIR}"
 
 # Drop caches for any other (old) kernel versions to keep the flash tidy.
 for d in &packages;/*; do
-  [ -d "$d" ] && [ "$(basename "$d")" != "${KERNEL_V}" ] && rm -rf "$d"
+  [ -d "$d" ] || continue
+  [ "$(basename "$d")" = "${KERNEL_V}" ] || rm -rf "$d"
 done
 
 download() {
