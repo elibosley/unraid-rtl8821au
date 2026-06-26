@@ -3,17 +3,31 @@ name: build-driver
 on:
   workflow_dispatch:
     inputs:
+      unraid_version:
+        description: "Unraid version to target (e.g. 7.3.1, or 'latest'). Ignored if kernel_version is set."
+        required: false
+        default: "latest"
       kernel_version:
-        description: "Target Unraid kernel release (uname -r)"
-        required: true
-        default: "6.18.33-Unraid"
+        description: "Exact kernel release (uname -r) to build using a committed config. Overrides unraid_version."
+        required: false
+        default: ""
       driver_ref:
         description: "morrownr/8821au git ref to build"
         required: false
         default: "main"
+      force:
+        description: "Rebuild/republish even if a release already exists"
+        required: false
+        default: "false"
+  schedule:
+    - cron: "17 7 * * *"   # daily: pick up new Unraid kernels automatically
 
 permissions:
-  contents: write   # needed to create the release
+  contents: write
+
+concurrency:
+  group: build-driver
+  cancel-in-progress: false
 
 jobs:
   build:
@@ -21,38 +35,91 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install build toolchain
+      - name: Install toolchain
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            build-essential bc bison flex libelf-dev libssl-dev \
-            kmod xz-utils ca-certificates git curl
+            build-essential bc bison flex libelf-dev libssl-dev kmod \
+            xz-utils ca-certificates git curl jq unzip squashfs-tools
+
+      - name: Resolve target kernel + config
+        id: resolve
+        env:
+          KVER_IN: ${{ github.event.inputs.kernel_version }}
+          UNRAID_IN: ${{ github.event.inputs.unraid_version }}
+          REPO: ${{ github.workspace }}
+        run: |
+          set -e
+          if [ -n "$KVER_IN" ]; then
+            # Explicit kernel: must already have a committed config.
+            if [ ! -f "kernel/$KVER_IN/config" ]; then
+              echo "ERROR: no committed config at kernel/$KVER_IN/config"; exit 1
+            fi
+            echo "kver=$KVER_IN" >> "$GITHUB_OUTPUT"
+            echo "Using committed config for $KVER_IN"
+          else
+            export UNRAID_VERSION="${UNRAID_IN:-latest}"
+            bash source/fetch-unraid-config.sh
+          fi
+
+      - name: Skip if release already exists
+        id: gate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          KVER: ${{ steps.resolve.outputs.kver }}
+          FORCE: ${{ github.event.inputs.force }}
+        run: |
+          if [ "$FORCE" != "true" ] && gh release view "$KVER" >/dev/null 2>&1; then
+            echo "Release $KVER already exists; nothing to do."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Build 8821au.ko
+        if: steps.gate.outputs.skip != 'true'
         env:
-          KVER: ${{ github.event.inputs.kernel_version }}
-          DRIVER_REF: ${{ github.event.inputs.driver_ref }}
+          KVER: ${{ steps.resolve.outputs.kver }}
+          DRIVER_REF: ${{ github.event.inputs.driver_ref || 'main' }}
           REPO: ${{ github.workspace }}
           OUT: ${{ github.workspace }}/out
         run: bash source/compile.sh
 
-      - name: Summarize
+      - name: Commit recovered config (provenance)
+        if: steps.gate.outputs.skip != 'true'
+        env:
+          KVER: ${{ steps.resolve.outputs.kver }}
         run: |
-          echo "### Built driver" >> "$GITHUB_STEP_SUMMARY"
-          echo '```' >> "$GITHUB_STEP_SUMMARY"
-          modinfo out/8821au.ko | grep -E 'vermagic|filename|version' >> "$GITHUB_STEP_SUMMARY" || true
-          echo "md5 $(cat out/8821au.ko.md5)" >> "$GITHUB_STEP_SUMMARY"
-          echo "driver $(cat out/driver.sha)" >> "$GITHUB_STEP_SUMMARY"
-          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add "kernel/$KVER/config" || true
+          if ! git diff --cached --quiet; then
+            git commit -m "kernel: pin config for $KVER [skip ci]"
+            git push origin HEAD:main
+          else
+            echo "config for $KVER already committed; nothing to push"
+          fi
 
-      - name: Publish release (tagged by kernel version)
+      - name: Summarize
+        if: steps.gate.outputs.skip != 'true'
+        run: |
+          {
+            echo "### Built 8821au for \`${{ steps.resolve.outputs.kver }}\`"
+            echo '```'
+            modinfo out/8821au.ko | grep -E 'vermagic|version' || true
+            echo "md5 $(cat out/8821au.ko.md5)"
+            echo "driver $(cat out/driver.sha)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Publish release (tag == kernel version)
+        if: steps.gate.outputs.skip != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
-          KVER: ${{ github.event.inputs.kernel_version }}
+          KVER: ${{ steps.resolve.outputs.kver }}
         run: |
-          # Release tag == exact kernel release, so the .plg can fetch by uname -r.
           gh release delete "$KVER" --yes --cleanup-tag 2>/dev/null || true
           gh release create "$KVER" \
             out/8821au.ko out/8821au.ko.md5 \
             --title "8821au for $KVER" \
-            --notes "RTL8811AU/RTL8821AU (morrownr 8821au, $(cat out/driver.sha)) built for Unraid kernel \`$KVER\`. Installed automatically by rtl8821au.plg."
+            --notes "RTL8811AU/RTL8821AU (morrownr 8821au, $(cat out/driver.sha)) built for Unraid kernel \`$KVER\`. Installed automatically by the plugin."
