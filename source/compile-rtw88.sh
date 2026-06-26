@@ -32,13 +32,18 @@ make -j"$JOBS" olddefconfig
 make -j"$JOBS" modules_prepare
 echo "::endgroup::"
 
-echo "::group::Build rtw88 modules (whole dir, so shared deps like rtw88_88xxa are built)"
+echo "::group::Build rtw88 chip + USB modules (+ shared rtw88_88xxa)"
 # Module.symvers is absent after modules_prepare; with MODVERSIONS off the inter-
-# module symbols (rtw88_core/usb, mac80211) resolve by name at load time, so let
-# modpost warn instead of error. Build the whole rtw88/ dir so the shared A-series
-# module (rtw88_88xxa, providing rtw88xxa_* symbols) is produced too.
+# module symbols (rtw88_core/usb, mac80211, and the shared rtw88_88xxa) resolve by
+# name at load time, so let modpost warn instead of error. Explicit .ko targets
+# (a bare dir target only compiles .o, it doesn't run modpost to produce .ko).
+# rtw88_88xxa provides the rtw88xxa_* symbols that rtw88_8821a/8812a/8814a need.
 RTW=drivers/net/wireless/realtek/rtw88
-make -j"$JOBS" KBUILD_MODPOST_WARN=1 "$RTW/"
+make -j"$JOBS" KBUILD_MODPOST_WARN=1 \
+  "$RTW/rtw88_88xxa.ko" \
+  "$RTW/rtw88_8821a.ko" "$RTW/rtw88_8821au.ko" \
+  "$RTW/rtw88_8812a.ko" "$RTW/rtw88_8812au.ko" \
+  "$RTW/rtw88_8814a.ko" "$RTW/rtw88_8814au.ko"
 echo "::endgroup::"
 
 mkdir -p "$OUT"
