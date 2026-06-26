@@ -94,10 +94,28 @@ if ! /sbin/lsmod | grep -q "^${MODNAME}\b" ; then
   fi
 fi
 
+# Auto-connect wlan0 if a wpa_supplicant config has been provided on the flash.
+# Create it with:  wpa_passphrase "SSID" "passphrase" > &plugin;/wpa_supplicant.conf
+WPA_CONF="&plugin;/wpa_supplicant.conf"
+if [ -s "${WPA_CONF}" ] ; then
+  echo "Found ${WPA_CONF}; connecting wlan0 ..."
+  /sbin/ip link set wlan0 up 2>/dev/null
+  /usr/bin/pkill -f "wpa_supplicant.*wlan0" 2>/dev/null
+  sleep 1
+  if /usr/sbin/wpa_supplicant -B -i wlan0 -D nl80211 -c "${WPA_CONF}" 2>/dev/null ; then
+    echo "wpa_supplicant started; requesting DHCP lease on wlan0."
+    /sbin/dhcpcd -b wlan0 2>/dev/null
+  else
+    echo "WARNING: wpa_supplicant failed to start on wlan0 (check ${WPA_CONF})."
+  fi
+fi
+
 echo ""
 echo "-----------------------------------------------------------"
 echo " rtl8821au plugin installed for kernel ${KERNEL_V}."
 echo " Adapter should now appear as wlan0 (iw dev / ip link)."
+echo " To connect: wpa_passphrase SSID PASS > ${WPA_CONF} then"
+echo " reinstall the plugin (or reboot)."
 echo "-----------------------------------------------------------"
 </INLINE>
 </FILE>
@@ -105,6 +123,8 @@ echo "-----------------------------------------------------------"
 <FILE Run="/bin/bash" Method="remove">
 <INLINE>
 MODNAME="8821au"
+/usr/bin/pkill -f "wpa_supplicant.*wlan0" 2>/dev/null
+/sbin/dhcpcd -k wlan0 2>/dev/null
 /sbin/modprobe -rf "${MODNAME}" 2>/dev/null
 rm -rf &plugin; &emhttp;
 echo "rtl8821au plugin removed. Module unloaded; reboot to fully clear."

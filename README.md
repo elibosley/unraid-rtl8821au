@@ -37,6 +37,21 @@ After an Unraid OS upgrade the kernel changes, so a new release is needed:
    `kernel_version=<uname -r>`.
 3. Reinstall / update the plugin on the box.
 
+## Connecting to a network
+
+`wlan0` is a plain client interface managed by `wpa_supplicant`. Drop a config
+on the flash and reinstall the plugin (or reboot) — it auto-connects on boot:
+
+```sh
+# hashes the passphrase (plaintext is not stored)
+wpa_passphrase "YourSSID" "YourPassphrase" \
+  > /boot/config/plugins/unraid-rtl8821au/wpa_supplicant.conf
+plugin install /boot/config/plugins/unraid-rtl8821au.plg   # connect now
+```
+
+The plugin starts `wpa_supplicant -i wlan0 -D nl80211` and `dhcpcd wlan0` on
+every boot whenever that config file exists.
+
 ## Caveats
 
 - **Host-only.** `wlan0` from this driver is a client interface. It **cannot**
