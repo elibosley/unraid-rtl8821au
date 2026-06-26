@@ -1,0 +1,58 @@
+name: build-driver
+
+on:
+  workflow_dispatch:
+    inputs:
+      kernel_version:
+        description: "Target Unraid kernel release (uname -r)"
+        required: true
+        default: "6.18.33-Unraid"
+      driver_ref:
+        description: "morrownr/8821au git ref to build"
+        required: false
+        default: "main"
+
+permissions:
+  contents: write   # needed to create the release
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential bc bison flex libelf-dev libssl-dev \
+            kmod xz-utils ca-certificates git curl
+
+      - name: Build 8821au.ko
+        env:
+          KVER: ${{ github.event.inputs.kernel_version }}
+          DRIVER_REF: ${{ github.event.inputs.driver_ref }}
+          REPO: ${{ github.workspace }}
+          OUT: ${{ github.workspace }}/out
+        run: bash source/compile.sh
+
+      - name: Summarize
+        run: |
+          echo "### Built driver" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          modinfo out/8821au.ko | grep -E 'vermagic|filename|version' >> "$GITHUB_STEP_SUMMARY" || true
+          echo "md5 $(cat out/8821au.ko.md5)" >> "$GITHUB_STEP_SUMMARY"
+          echo "driver $(cat out/driver.sha)" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Publish release (tagged by kernel version)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          KVER: ${{ github.event.inputs.kernel_version }}
+        run: |
+          # Release tag == exact kernel release, so the .plg can fetch by uname -r.
+          gh release delete "$KVER" --yes --cleanup-tag 2>/dev/null || true
+          gh release create "$KVER" \
+            out/8821au.ko out/8821au.ko.md5 \
+            --title "8821au for $KVER" \
+            --notes "RTL8811AU/RTL8821AU (morrownr 8821au, $(cat out/driver.sha)) built for Unraid kernel \`$KVER\`. Installed automatically by rtl8821au.plg."

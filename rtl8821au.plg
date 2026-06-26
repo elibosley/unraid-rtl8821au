@@ -1,0 +1,113 @@
+<?xml version='1.0' standalone='yes'?>
+<!DOCTYPE PLUGIN [
+  <!ENTITY name      "unraid-rtl8821au">
+  <!ENTITY author    "elibosley">
+  <!ENTITY version   "2026.06.26">
+  <!ENTITY gitURL    "https://github.com/&author;/&name;/raw/main">
+  <!ENTITY pluginURL "&gitURL;/rtl8821au.plg">
+  <!ENTITY relURL    "https://github.com/&author;/&name;/releases/download">
+  <!ENTITY plugin    "/boot/config/plugins/&name;">
+  <!ENTITY emhttp    "/usr/local/emhttp/plugins/&name;">
+  <!ENTITY packages  "/boot/config/plugins/&name;/packages">
+]>
+
+<PLUGIN name="&name;" author="&author;" version="&version;" pluginURL="&pluginURL;" min="6.12.0">
+
+<CHANGES>
+###2026.06.26
+- Initial release: out-of-tree morrownr 8821au driver (RTL8811AU / RTL8821AU) for Unraid.
+</CHANGES>
+
+<FILE Name="&emhttp;/README.md">
+<INLINE>
+**RTL8811AU / RTL8821AU USB WiFi driver (out-of-tree, morrownr 8821au)**
+
+Provides a `wlan0` interface for USB WiFi adapters based on the Realtek
+RTL8811AU / RTL8821AU chipset (e.g. TP-Link Archer T2U Nano `2357:011e`),
+which has no in-kernel driver on Unraid.
+
+The matching `8821au.ko` is built in CI per Unraid kernel release and pulled
+from this plugin's GitHub releases (tag == `uname -r`). On every boot the
+plugin re-installs the module into the RAM module tree and loads it.
+
+NOTE: this is a host-only client interface. It is not bridgeable into `br0`
+and is not managed by Unraid's Network Settings GUI. Configure the connection
+with `wpa_supplicant`. After an Unraid OS upgrade, a new release must exist for
+the new kernel version (re-run the build workflow) or the module won't load.
+
+Source driver: https://github.com/morrownr/8821au-20210708
+</INLINE>
+</FILE>
+
+<FILE Run="/bin/bash">
+<INLINE>
+KERNEL_V="$(uname -r)"
+MODNAME="8821au"
+PKG_DIR="&packages;/${KERNEL_V}"
+KO_CACHE="${PKG_DIR}/${MODNAME}.ko"
+MOD_DEST="/lib/modules/${KERNEL_V}/kernel/drivers/net/wireless/realtek/${MODNAME}"
+DL_URL="&relURL;/${KERNEL_V}"
+
+mkdir -p "${PKG_DIR}"
+
+# Drop caches for any other (old) kernel versions to keep the flash tidy.
+for d in &packages;/*; do
+  [ -d "$d" ] && [ "$(basename "$d")" != "${KERNEL_V}" ] && rm -rf "$d"
+done
+
+download() {
+  echo "Downloading ${MODNAME}.ko for kernel ${KERNEL_V} ..."
+  if ! wget -q -nc --show-progress --progress=bar:force:noscroll -O "${KO_CACHE}" "${DL_URL}/${MODNAME}.ko" ; then
+    echo "------------------------------------------------------------------"
+    echo "ERROR: no ${MODNAME}.ko release found for kernel ${KERNEL_V}."
+    echo "Build it first: run the 'build-driver' workflow in"
+    echo "  https://github.com/&author;/&name;"
+    echo "with kernel_version=${KERNEL_V}, then reinstall this plugin."
+    echo "------------------------------------------------------------------"
+    rm -f "${KO_CACHE}"
+    exit 1
+  fi
+  wget -q -O "${KO_CACHE}.md5" "${DL_URL}/${MODNAME}.ko.md5" 2>/dev/null
+  if [ -s "${KO_CACHE}.md5" ]; then
+    if [ "$(md5sum "${KO_CACHE}" | awk '{print $1}')" != "$(awk '{print $1}' "${KO_CACHE}.md5")" ]; then
+      echo "ERROR: checksum mismatch on ${MODNAME}.ko"
+      rm -f "${KO_CACHE}" "${KO_CACHE}.md5"
+      exit 1
+    fi
+  fi
+}
+
+# Fetch to flash cache if we don't already have it.
+[ -s "${KO_CACHE}" ] || download
+
+# Install into the (tmpfs) running module tree and register it.
+install -D -m 0644 "${KO_CACHE}" "${MOD_DEST}/${MODNAME}.ko"
+depmod -a
+
+# Load it (idempotent).
+if ! /sbin/lsmod | grep -q "^${MODNAME}\b" ; then
+  if /sbin/modprobe "${MODNAME}" 2>/dev/null ; then
+    echo "${MODNAME} loaded."
+  else
+    echo "WARNING: modprobe ${MODNAME} failed - check 'dmesg | tail'."
+  fi
+fi
+
+echo ""
+echo "-----------------------------------------------------------"
+echo " rtl8821au plugin installed for kernel ${KERNEL_V}."
+echo " Adapter should now appear as wlan0 (iw dev / ip link)."
+echo "-----------------------------------------------------------"
+</INLINE>
+</FILE>
+
+<FILE Run="/bin/bash" Method="remove">
+<INLINE>
+MODNAME="8821au"
+/sbin/modprobe -rf "${MODNAME}" 2>/dev/null
+rm -rf &plugin; &emhttp;
+echo "rtl8821au plugin removed. Module unloaded; reboot to fully clear."
+</INLINE>
+</FILE>
+
+</PLUGIN>
