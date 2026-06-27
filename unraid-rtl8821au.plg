@@ -109,12 +109,12 @@ fi
 # mechanism (regdomain + wpa_supplicant + dhcpcd) - not a second supplicant.
 if [ "$loaded" = "yes" ] ; then
   if grep -q 'GROUP="active"' /boot/config/wireless.cfg 2>/dev/null ; then
-    if /usr/bin/pgrep -f "wpa_supplicant.*wlan" >/dev/null 2>&1 ; then
+    if /usr/bin/pgrep -f "wpa_supplicant.*wlan" >/dev/null 2>&amp;1 ; then
       echo "Unraid-managed wifi already running."
     else
       if [ -x /etc/rc.d/rc.wireless ] ; then
         echo "Driver loaded after rc.wireless ran; starting Unraid wifi now."
-        /etc/rc.d/rc.wireless start >/dev/null 2>&1
+        /etc/rc.d/rc.wireless start >/dev/null 2>&amp;1
       fi
     fi
   fi
