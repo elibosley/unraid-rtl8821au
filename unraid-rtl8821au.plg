@@ -2,7 +2,7 @@
 <!DOCTYPE PLUGIN [
   <!ENTITY name      "unraid-rtl8821au">
   <!ENTITY author    "elibosley">
-  <!ENTITY version   "2026.06.27">
+  <!ENTITY version   "2026.06.27.1">
   <!ENTITY gitURL    "https://github.com/&author;/&name;/raw/main">
   <!ENTITY pluginURL "&gitURL;/unraid-rtl8821au.plg">
   <!ENTITY relURL    "https://github.com/&author;/&name;/releases/download">
@@ -14,6 +14,10 @@
 <PLUGIN name="&name;" author="&author;" version="&version;" pluginURL="&pluginURL;" min="6.12.0">
 
 <CHANGES>
+###2026.06.27.1
+- Boot-order fix: the driver loads after Unraid's rc.wireless runs, so wifi never
+  came up on reboot. The plugin now starts Unraid's rc.wireless once the driver is
+  loaded (if a network is configured and not already connected).
 ###2026.06.27
 - Switch to the in-kernel mac80211 rtw88 driver (RTL8811AU/8821AU/8812AU/8814AU)
   which Unraid ships disabled. Bundles firmware. Supports WPA3-SAE (the morrownr
@@ -95,6 +99,25 @@ done
 sleep 1
 if /sbin/lsmod | grep -q "^rtw88_core" ; then
   if ls /sys/class/net/ | grep -q "^wlan" ; then loaded="yes"; fi
+fi
+
+# Boot-order fix: Unraid's rc.wireless runs during early network init, BEFORE
+# this plugin has loaded the driver, so wlan0 doesn't exist yet and the wifi
+# connection never starts (and the regdomain from Region isn't applied). Now
+# that the driver is up, kick Unraid's own rc.wireless if a network is
+# configured and nothing is connected yet. This drives Unraid's existing
+# mechanism (regdomain + wpa_supplicant + dhcpcd) - not a second supplicant.
+if [ "$loaded" = "yes" ] ; then
+  if grep -q 'GROUP="active"' /boot/config/wireless.cfg 2>/dev/null ; then
+    if /usr/bin/pgrep -f "wpa_supplicant.*wlan" >/dev/null 2>&1 ; then
+      echo "Unraid-managed wifi already running."
+    else
+      if [ -x /etc/rc.d/rc.wireless ] ; then
+        echo "Driver loaded after rc.wireless ran; starting Unraid wifi now."
+        /etc/rc.d/rc.wireless start >/dev/null 2>&1
+      fi
+    fi
+  fi
 fi
 
 echo ""
