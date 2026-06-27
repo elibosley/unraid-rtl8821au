@@ -2,7 +2,7 @@
 <!DOCTYPE PLUGIN [
   <!ENTITY name      "unraid-rtl8821au">
   <!ENTITY author    "elibosley">
-  <!ENTITY version   "2026.06.27.1">
+  <!ENTITY version   "2026.06.27.3">
   <!ENTITY gitURL    "https://github.com/&author;/&name;/raw/main">
   <!ENTITY pluginURL "&gitURL;/unraid-rtl8821au.plg">
   <!ENTITY relURL    "https://github.com/&author;/&name;/releases/download">
@@ -14,6 +14,15 @@
 <PLUGIN name="&name;" author="&author;" version="&version;" pluginURL="&pluginURL;" min="6.12.0">
 
 <CHANGES>
+###2026.06.27.3
+- Pre-reboot driver staging for OS updates. An Unraid OS update brings a new
+  kernel but keeps running the old one until reboot, and the driver only matches
+  one kernel - so a reboot could land on a kernel with no WiFi driver. The plugin
+  now hooks Unraid's 'os_update' event: during an update, before the reboot
+  prompt, it stages the matching rtw88 build for the incoming kernel (so "PLEASE
+  REBOOT" only shows once WiFi is ready) and raises an alert if no build exists
+  yet. Requires Unraid with the os_update event (webgui OS-486); on older
+  releases the driver is fetched after reboot as before.
 ###2026.06.27.1
 - Boot-order fix: the driver loads after Unraid's rc.wireless runs, so wifi never
   came up on reboot. The plugin now starts Unraid's rc.wireless once the driver is
@@ -43,6 +52,94 @@ into br0 (802.11 station limitation), so no Docker/VM bridged networking over it
 
 Modules + firmware are built per Unraid kernel in CI and pulled from this repo's
 releases (tag == `uname -r`).
+
+**OS updates:** an `event/os_update` hook lets Unraid stage the *incoming*
+kernel's driver before you reboot, so WiFi survives the upgrade. If no build
+exists yet for the incoming kernel it raises an Unraid alert. (Needs an Unraid
+release with the `os_update` event; older releases fetch the driver after reboot.)
+</INLINE>
+</FILE>
+
+<!-- Pre-reboot hook: stage the incoming kernel's driver before an OS-update reboot.
+     Driven by Unraid's 'os_update' event (webgui OS-486 / PR unraid/webgui#2683),
+     which fires during an OS update - after the new release files are on the flash
+     but before the reboot prompt - with $2=incoming Unraid version, $3=incoming
+     kernel release. Runs synchronously, so "PLEASE REBOOT" only shows once the
+     matching driver is staged. -->
+<FILE Name="&emhttp;/event/os_update" Mode="0755">
+<INLINE>
+#!/bin/bash
+# rtw88 WiFi driver - Unraid 'os_update' pre-reboot hook.
+#
+# Unraid OS updates bring a NEW kernel but keep running the old one until reboot.
+# The boot-time installer only fetches the driver for the *running* kernel, so a
+# reboot into the updated OS could come up with NO matching driver (= no WiFi,
+# fatal for a headless box on a WiFi-only link). This hook fires before reboot
+# and pre-downloads the incoming kernel's rtw88 bundle into the flash cache, and
+# raises an Unraid alert if no build is published yet for that kernel.
+NAME="unraid-rtl8821au"
+AUTHOR="elibosley"
+PKG_ROOT="/boot/config/plugins/${NAME}/packages"
+REL="https://github.com/${AUTHOR}/${NAME}/releases/download"
+
+notify() {   # subject, description, importance (normal|warning|alert)
+  if [ -x /usr/local/emhttp/webGui/scripts/notify ] ; then
+    /usr/local/emhttp/webGui/scripts/notify \
+      -e "WiFi driver (rtw88)" -s "$1" -d "$2" -i "${3:-normal}" >/dev/null 2>/dev/null
+  fi
+}
+
+RUNNING="$(uname -r)"
+
+# Incoming kernel: prefer the value the event passes ($3, uname -r form). Fall
+# back to parsing /boot/changes.txt (the new release notes are already on the
+# flash here) in case a caller does not supply it. The version may sit on the
+# same line as "Linux kernel" (7.3.x: "* Linux kernel: update to X.Y.Z") or just
+# below a "### Linux kernel" heading - scan a small window anchored to it.
+NEW="$3"
+if [ -z "$NEW" ] ; then
+  NUM="$(awk '
+    /[Ll]inux kernel/ { f=3 }
+    f>0 { if (match($0,/[0-9]+(\.[0-9]+)+/)) { print substr($0,RSTART,RLENGTH); exit } f-- }
+  ' /boot/changes.txt 2>/dev/null | head -1)"
+  if [ -n "$NUM" ] ; then NEW="${NUM}-Unraid" ; fi
+fi
+if [ -z "$NEW" ] ; then exit 0 ; fi
+
+# Incoming kernel == running kernel: nothing to stage.
+if [ "$NEW" = "$RUNNING" ] ; then exit 0 ; fi
+
+DIR="${PKG_ROOT}/${NEW}"
+BUNDLE="rtw88-${NEW}.tar.gz"
+CACHE="${DIR}/${BUNDLE}"
+URL="${REL}/${NEW}/${BUNDLE}"
+
+echo "rtw88: staging WiFi driver for incoming kernel ${NEW} ..."
+
+# Already staged for the incoming kernel.
+if [ -s "$CACHE" ] ; then echo "rtw88: already staged." ; exit 0 ; fi
+mkdir -p "$DIR"
+
+if ! wget -q -T 20 -O "$CACHE" "$URL" ; then
+  rm -f "$CACHE"
+  echo "rtw88: WARNING - no build published for ${NEW}; WiFi will be down after reboot."
+  notify "no WiFi driver for incoming kernel ${NEW}" "Unraid is updating to kernel ${NEW} but no matching rtw88 WiFi build is published yet. WiFi will be DOWN after reboot until a build exists - do NOT reboot if WiFi is your only network connection. Builds are produced daily; re-check later or run the build-driver workflow for ${NEW}." "alert"
+  exit 0
+fi
+
+# Verify the checksum when one is published alongside the bundle.
+wget -q -T 20 -O "${CACHE}.md5" "${URL}.md5" 2>/dev/null
+if [ -s "${CACHE}.md5" ] ; then
+  if [ "$(md5sum "$CACHE" | awk '{print $1}')" != "$(awk '{print $1}' "${CACHE}.md5")" ] ; then
+    rm -f "$CACHE" "${CACHE}.md5"
+    echo "rtw88: WARNING - checksum mismatch for ${NEW}; discarded."
+    notify "checksum mismatch for ${NEW}" "The rtw88 WiFi bundle for incoming kernel ${NEW} failed its checksum and was discarded. WiFi may be down after reboot; reinstall the plugin or re-run the build to retry." "warning"
+    exit 0
+  fi
+fi
+
+echo "rtw88: driver for ${NEW} staged; it will load automatically after reboot."
+notify "WiFi driver staged for ${NEW}" "The rtw88 WiFi driver for the incoming Unraid kernel ${NEW} has been downloaded and will load automatically after you reboot." "normal"
 </INLINE>
 </FILE>
 
@@ -131,6 +228,12 @@ fi
 echo " Configure WiFi in Settings -> Network Settings (set Region!)."
 echo " WPA3-SAE is supported. Unraid manages association + DHCP."
 echo "-----------------------------------------------------------"
+
+# Pre-reboot driver staging is handled by the event/os_update hook (installed
+# above), which Unraid fires during an OS update before the reboot prompt. No
+# cron or background watcher needed. Requires Unraid with the os_update event
+# (webgui OS-486); on older releases there is no pre-reboot staging and the
+# boot-time installer above fetches the driver after the reboot instead.
 </INLINE>
 </FILE>
 
